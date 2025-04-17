@@ -70,3 +70,5 @@ SwiftFFmpeg.xcodeproj/
 docs/
 scripts/*
 !scripts/*.sh
+
+.DS_Store

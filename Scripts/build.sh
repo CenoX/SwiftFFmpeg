@@ -1,10 +1,10 @@
 #!/bin/bash
 
-FFMPEG_VERSION=7.1
+FFMPEG_VERSION=7.1.1
 FFMPEG_SOURCE_DIR=FFmpeg-n$FFMPEG_VERSION
 FFMPEG_LIBS="libavcodec libavdevice libavfilter libavformat libavutil libpostproc libswresample libswscale"
 PREFIX=`pwd`/output
-ARCH="x86_64"
+ARCH="arm64"
 
 if [ ! -d $FFMPEG_SOURCE_DIR ]; then
   echo "Start downloading FFmpeg..."
@@ -20,16 +20,21 @@ cd $FFMPEG_SOURCE_DIR
 
 ./configure \
   --prefix=$PREFIX \
-  --enable-gpl \
   --enable-version3 \
   --disable-programs \
+  --enable-cross-compile \
+  --target-os=darwin \
+  --disable-indev=audiotoolbox \
+  --disable-outdev=audiotoolbox \
+  --cc="$(xcrun -sdk iphoneos -f clang)" \
+  --sysroot=$(xcrun --sdk iphoneos --show-sdk-path) \
   --disable-doc \
   --arch=$ARCH \
   --extra-cflags="-arch $ARCH -march=native -fno-stack-check" \
   --disable-debug || exit 1
 
 make clean
-make -j8 install || exit 1
+make -j$(nproc) install || exit 1
 
 cd ..
 

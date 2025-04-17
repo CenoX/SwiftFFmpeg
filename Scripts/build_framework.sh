@@ -46,15 +46,15 @@ EOF
 # build xcframework
 rm -rf $LIB_XCFRAMEWORK
 
-# xcodebuild \
-#   -create-xcframework \
-#   -framework $LIB_FRAMEWORK \
-#   -output $LIB_XCFRAMEWORK
-# 
+xcodebuild \
+  -create-xcframework \
+  -framework $LIB_FRAMEWORK \
+  -output $LIB_XCFRAMEWORK
+
 # error: unable to find any specific architecture information in the binary at xxx
 
-mkdir -p $LIB_XCFRAMEWORK/macos-x86_64
-cp -R $LIB_FRAMEWORK $LIB_XCFRAMEWORK/macos-x86_64
+mkdir -p $LIB_XCFRAMEWORK/ios-arm64
+cp -R $LIB_FRAMEWORK $LIB_XCFRAMEWORK/ios-arm64
 
 cat > $LIB_XCFRAMEWORK/Info.plist << EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -65,15 +65,15 @@ cat > $LIB_XCFRAMEWORK/Info.plist << EOF
 	<array>
 		<dict>
 			<key>LibraryIdentifier</key>
-			<string>macos-x86_64</string>
+			<string>ios-arm64</string>
 			<key>LibraryPath</key>
 			<string>$LIB_NAME.framework</string>
 			<key>SupportedArchitectures</key>
 			<array>
-				<string>x86_64</string>
+				<string>arm64</string>
 			</array>
 			<key>SupportedPlatform</key>
-			<string>macos</string>
+			<string>ios</string>
 		</dict>
 	</array>
 	<key>CFBundlePackageType</key>
