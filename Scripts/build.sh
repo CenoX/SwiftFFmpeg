@@ -30,7 +30,8 @@ cd $FFMPEG_SOURCE_DIR
   --sysroot=$(xcrun --sdk iphoneos --show-sdk-path) \
   --disable-doc \
   --arch=$ARCH \
-  --extra-cflags="-arch $ARCH -march=native -fno-stack-check" \
+  --extra-cflags="-arch $ARCH -march=native -fno-stack-check  -mios-version-min=18.0" \
+  --extra-ldflags="-arch $ARCH -mios-version-min=18.0" \
   --disable-debug || exit 1
 
 make clean
