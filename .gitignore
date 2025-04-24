@@ -72,3 +72,4 @@ scripts/*
 !scripts/*.sh
 
 .DS_Store
+.vscode
