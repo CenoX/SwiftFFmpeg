@@ -3,18 +3,38 @@
 PREFIX=$1
 LIB_NAME=$2
 LIB_VERSION=$3
-LIB_FRAMEWORK=$PREFIX/framework/$LIB_NAME.framework
+PLATFORMS=("ios-arm64" "ios-arm64-simulator")
 LIB_XCFRAMEWORK=$PREFIX/xcframework/$LIB_NAME.xcframework
 
-# build framework
-rm -rf $LIB_FRAMEWORK
+for PLATFORM in "${PLATFORMS[@]}"; do
+	if [[ "$PLATFORM" == "ios-arm64" ]]; then
+		SDK_PLATFORM="iphoneos-arm64"
+	elif [[ "$PLATFORM" == "ios-arm64-simulator" ]]; then
+		SDK_PLATFORM="iphonesimulator-arm64"
+	else
+		echo "❌ Unknown platform: $PLATFORM"
+		exit 1
+	fi
 
-mkdir -p $LIB_FRAMEWORK/Headers
-cp -R $PREFIX/include/$LIB_NAME/ $LIB_FRAMEWORK/Headers
+	# framework/ios-arm64/libavcodec.framework
+	FRAMEWORK_PARENT_DIR=$PREFIX/framework/$PLATFORM
+	LIB_FRAMEWORK=$FRAMEWORK_PARENT_DIR/$LIB_NAME.framework
 
-cp $PREFIX/lib/$LIB_NAME.a $LIB_FRAMEWORK/$LIB_NAME
+	# save xcframework input variable
+	if [[ "$PLATFORM" == "ios-arm64" ]]; then
+		LIB_DEVICE=$LIB_FRAMEWORK
+	else
+		LIB_SIMULATOR=$LIB_FRAMEWORK
+	fi
 
-cat > $LIB_FRAMEWORK/Info.plist << EOF
+	# build framework
+	rm -rf $LIB_FRAMEWORK
+	mkdir -p $LIB_FRAMEWORK/Headers
+
+	cp -R $PREFIX/$SDK_PLATFORM/include/$LIB_NAME/* $LIB_FRAMEWORK/Headers/
+	cp $PREFIX/$SDK_PLATFORM/lib/$LIB_NAME.a $LIB_FRAMEWORK/$LIB_NAME
+
+	cat > $LIB_FRAMEWORK/Info.plist << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -35,26 +55,29 @@ cat > $LIB_FRAMEWORK/Info.plist << EOF
 	<string>$LIB_VERSION</string>
 	<key>CFBundleVersion</key>
 	<string>$LIB_VERSION</string>
-	<key>CFBundleSignature</key>
-	<string>????</string>
-	<key>NSPrincipalClass</key>
-	<string></string>
 </dict>
 </plist>
 EOF
+
+done
 
 # build xcframework
 rm -rf $LIB_XCFRAMEWORK
 
 xcodebuild \
-  -create-xcframework \
-  -framework $LIB_FRAMEWORK \
-  -output $LIB_XCFRAMEWORK
+	-verbose \
+	-create-xcframework \
+	-framework $LIB_DEVICE \
+	-output $LIB_XCFRAMEWORK
 
 # error: unable to find any specific architecture information in the binary at xxx
 
 mkdir -p $LIB_XCFRAMEWORK/ios-arm64
-cp -R $LIB_FRAMEWORK $LIB_XCFRAMEWORK/ios-arm64
+# mkdir -p $LIB_XCFRAMEWORK/ios-arm64-simulator
+cp -R $LIB_DEVICE $LIB_XCFRAMEWORK/ios-arm64
+# cp -R $LIB_SIMULATOR $LIB_XCFRAMEWORK/ios-arm64-simulator
+
+# error: unable to make xcframework with the following architectures: ios-arm64-simulator
 
 cat > $LIB_XCFRAMEWORK/Info.plist << EOF
 <?xml version="1.0" encoding="UTF-8"?>
