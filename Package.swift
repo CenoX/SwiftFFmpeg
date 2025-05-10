@@ -29,20 +29,23 @@ let package = Package(
       path: "Sources/CFFmpeg/",
       publicHeadersPath: ".",
       cSettings: [
-        .headerSearchPath("./Scripts/output/include")
+        .headerSearchPath("./Scripts/output/iphoneos-arm64/include"),
+        .headerSearchPath("./Scripts/output/macos-arm64/include"),
       ],
       linkerSettings: [
+        .linkedFramework("CoreGraphics"),
+        .linkedFramework("CoreImage"),
         .linkedFramework("VideoToolbox"),
+        .linkedFramework("Foundation"),
         .linkedFramework("CoreMedia"),
         .linkedFramework("AudioToolbox"),
         .linkedFramework("AVFoundation"),
         .linkedFramework("CoreAudio"),
+        .linkedFramework("AppKit"),
+        .linkedFramework("OpenGL"),
         .linkedLibrary("bz2"),
         .linkedLibrary("iconv"),
-        .unsafeFlags([
-//            "-L./Scripts/output/lib",
-//            "-lavcodec", "-lavformat", "-lavutil", "-lswscale", "-lswresample", "-lavfilter"
-        ])
+        .linkedLibrary("z"),
       ]
     ),
     

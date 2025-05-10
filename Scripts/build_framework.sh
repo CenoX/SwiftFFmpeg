@@ -3,14 +3,14 @@
 PREFIX=$1
 LIB_NAME=$2
 LIB_VERSION=$3
-PLATFORMS=("ios-arm64" "ios-arm64-simulator")
+PLATFORMS=("ios-arm64" "macosx")
 LIB_XCFRAMEWORK=$PREFIX/xcframework/$LIB_NAME.xcframework
 
 for PLATFORM in "${PLATFORMS[@]}"; do
 	if [[ "$PLATFORM" == "ios-arm64" ]]; then
 		SDK_PLATFORM="iphoneos-arm64"
-	elif [[ "$PLATFORM" == "ios-arm64-simulator" ]]; then
-		SDK_PLATFORM="iphonesimulator-arm64"
+	elif [[ "$PLATFORM" == "macosx" ]]; then
+		SDK_PLATFORM="macosx-arm64"
 	else
 		echo "❌ Unknown platform: $PLATFORM"
 		exit 1
@@ -24,7 +24,7 @@ for PLATFORM in "${PLATFORMS[@]}"; do
 	if [[ "$PLATFORM" == "ios-arm64" ]]; then
 		LIB_DEVICE=$LIB_FRAMEWORK
 	else
-		LIB_SIMULATOR=$LIB_FRAMEWORK
+		LIB_MACOS=$LIB_FRAMEWORK
 	fi
 
 	# build framework
@@ -32,7 +32,7 @@ for PLATFORM in "${PLATFORMS[@]}"; do
 	mkdir -p $LIB_FRAMEWORK/Headers
 
 	cp -R $PREFIX/$SDK_PLATFORM/include/$LIB_NAME/* $LIB_FRAMEWORK/Headers/
-	cp $PREFIX/$SDK_PLATFORM/lib/$LIB_NAME.a $LIB_FRAMEWORK/$LIB_NAME
+	libtool -static -o $LIB_FRAMEWORK/$LIB_NAME $PREFIX/$SDK_PLATFORM/lib/$LIB_NAME.a
 
 	cat > $LIB_FRAMEWORK/Info.plist << EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -68,16 +68,15 @@ xcodebuild \
 	-verbose \
 	-create-xcframework \
 	-framework $LIB_DEVICE \
+	-framework $LIB_MACOS \
 	-output $LIB_XCFRAMEWORK
 
 # error: unable to find any specific architecture information in the binary at xxx
 
 mkdir -p $LIB_XCFRAMEWORK/ios-arm64
-# mkdir -p $LIB_XCFRAMEWORK/ios-arm64-simulator
+mkdir -p $LIB_XCFRAMEWORK/macos-arm64
 cp -R $LIB_DEVICE $LIB_XCFRAMEWORK/ios-arm64
-# cp -R $LIB_SIMULATOR $LIB_XCFRAMEWORK/ios-arm64-simulator
-
-# error: unable to make xcframework with the following architectures: ios-arm64-simulator
+cp -R $LIB_MACOS $LIB_XCFRAMEWORK/macos-arm64
 
 cat > $LIB_XCFRAMEWORK/Info.plist << EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -97,6 +96,18 @@ cat > $LIB_XCFRAMEWORK/Info.plist << EOF
 			</array>
 			<key>SupportedPlatform</key>
 			<string>ios</string>
+		</dict>
+		<dict>
+			<key>LibraryIdentifier</key>
+			<string>macos-arm64</string>
+			<key>LibraryPath</key>
+			<string>$LIB_NAME.framework</string>
+			<key>SupportedArchitectures</key>
+			<array>
+				<string>arm64</string>
+			</array>
+			<key>SupportedPlatform</key>
+			<string>macos</string>
 		</dict>
 	</array>
 	<key>CFBundlePackageType</key>

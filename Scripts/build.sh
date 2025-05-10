@@ -5,7 +5,7 @@ FFMPEG_SOURCE_DIR=FFmpeg-n$FFMPEG_VERSION
 FFMPEG_LIBS="libavcodec libavdevice libavfilter libavformat libavutil libswresample libswscale"
 PREFIX=`pwd`/output
 ARCH=arm64
-PLATFORMS=("iphoneos" "iphonesimulator")
+PLATFORMS=("iphoneos" "macosx")
 
 if [ ! -d $FFMPEG_SOURCE_DIR ]; then
   echo "Start downloading FFmpeg..."
@@ -18,11 +18,15 @@ echo "Start compiling FFmpeg..."
 
 rm -rf $PREFIX
 mkdir -p $PREFIX
-cd $FFMPEG_SOURCE_DIR
 
-# for iOS Devices
 for PLATFORM in "${PLATFORMS[@]}"; do
-  SYSROOT=$(xcrun --sdk $PLATFORM --show-sdk-path)
+  if [ "$PLATFORM" == "macosx" ]; then
+    SYSROOT=$(xcrun --sdk macosx --show-sdk-path)
+    OS_FLAGS="-mmacosx-version-min=15.0"
+  else
+    SYSROOT=$(xcrun --sdk $PLATFORM --show-sdk-path)
+    OS_FLAGS="-mios-version-min=18.0"
+  fi
   CC=$(xcrun -sdk $PLATFORM -f clang)
   TARGET_PREFIX=$PREFIX/$PLATFORM-$ARCH
 
@@ -42,8 +46,8 @@ for PLATFORM in "${PLATFORMS[@]}"; do
     --arch=$ARCH \
     --cc="$CC" \
     --sysroot=$SYSROOT \
-    --extra-cflags="-arch $ARCH -march=native -fno-stack-check -mios-version-min=18.0" \
-    --extra-ldflags="-arch $ARCH -mios-version-min=18.0" \
+    --extra-cflags="-arch $ARCH -march=native -fno-stack-check $OS_FLAGS" \
+    --extra-ldflags="-arch $ARCH $OS_FLAGS" \
     --disable-outdev=audiotoolbox || exit 1
 
   make clean
