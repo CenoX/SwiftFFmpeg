@@ -3,26 +3,33 @@
 PREFIX=$1
 LIB_NAME=$2
 LIB_VERSION=$3
-PLATFORMS=("ios-arm64" "macosx")
+PLATFORMS=("ios" "iphonesimulator" "macosx")
 LIB_XCFRAMEWORK=$PREFIX/xcframework/$LIB_NAME.xcframework
 
 for PLATFORM in "${PLATFORMS[@]}"; do
-	if [[ "$PLATFORM" == "ios-arm64" ]]; then
+	FRAMEWORK_PARENT_DIR=$PREFIX/framework/$PLATFORM
+
+	if [[ "$PLATFORM" == "ios" ]]; then
 		SDK_PLATFORM="iphoneos-arm64"
+		TARGET="iPhoneOS"
+	elif [[ "$PLATFORM" == "iphonesimulator" ]]; then
+		SDK_PLATFORM="iphonesimulator-arm64"
+		TARGET="iPhoneSimulator"
 	elif [[ "$PLATFORM" == "macosx" ]]; then
 		SDK_PLATFORM="macosx-arm64"
+		TARGET="MacOSX"
 	else
 		echo "❌ Unknown platform: $PLATFORM"
 		exit 1
 	fi
 
-	# framework/ios-arm64/libavcodec.framework
-	FRAMEWORK_PARENT_DIR=$PREFIX/framework/$PLATFORM
 	LIB_FRAMEWORK=$FRAMEWORK_PARENT_DIR/$LIB_NAME.framework
 
 	# save xcframework input variable
-	if [[ "$PLATFORM" == "ios-arm64" ]]; then
+	if [[ "$PLATFORM" == "ios" ]]; then
 		LIB_DEVICE=$LIB_FRAMEWORK
+	elif [[ "$PLATFORM" == "iphonesimulator" ]]; then
+		LIB_SIM=$LIB_FRAMEWORK
 	else
 		LIB_MACOS=$LIB_FRAMEWORK
 	fi
@@ -55,6 +62,10 @@ for PLATFORM in "${PLATFORMS[@]}"; do
 	<string>$LIB_VERSION</string>
 	<key>CFBundleVersion</key>
 	<string>$LIB_VERSION</string>
+	<key>CFBundleSupportedPlatforms</key>
+	<array>
+		<string>$TARGET</string>
+	</array>
 </dict>
 </plist>
 EOF
@@ -68,14 +79,18 @@ xcodebuild \
 	-verbose \
 	-create-xcframework \
 	-framework $LIB_DEVICE \
+	-framework $LIB_SIM \
 	-framework $LIB_MACOS \
 	-output $LIB_XCFRAMEWORK
 
 # error: unable to find any specific architecture information in the binary at xxx
 
 mkdir -p $LIB_XCFRAMEWORK/ios-arm64
+mkdir -p $LIB_XCFRAMEWORK/iossim-arm64
 mkdir -p $LIB_XCFRAMEWORK/macos-arm64
+
 cp -R $LIB_DEVICE $LIB_XCFRAMEWORK/ios-arm64
+cp -R $LIB_SIM $LIB_XCFRAMEWORK/iossim-arm64
 cp -R $LIB_MACOS $LIB_XCFRAMEWORK/macos-arm64
 
 cat > $LIB_XCFRAMEWORK/Info.plist << EOF
@@ -96,6 +111,30 @@ cat > $LIB_XCFRAMEWORK/Info.plist << EOF
 			</array>
 			<key>SupportedPlatform</key>
 			<string>ios</string>
+		</dict>
+		<dict>
+			<key>LibraryIdentifier</key>
+			<string>ios-arm64-simulator</string>
+			<key>LibraryPath</key>
+			<string>$LIB_NAME.framework</string>
+			<key>SupportedArchitectures</key>
+			<array>
+				<string>arm64</string>
+			</array>
+			<key>SupportedPlatform</key>
+			<string>iossimulator</string>
+		</dict>
+		<dict>
+			<key>LibraryIdentifier</key>
+			<string>iossim-arm64</string>
+			<key>LibraryPath</key>
+			<string>$LIB_NAME.framework</string>
+			<key>SupportedArchitectures</key>
+			<array>
+				<string>arm64</string>
+			</array>
+			<key>SupportedPlatform</key>
+			<string>iphonesimulator</string>
 		</dict>
 		<dict>
 			<key>LibraryIdentifier</key>
