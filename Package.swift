@@ -41,6 +41,8 @@ let package = Package(
         .linkedFramework("CoreMedia"),
         .linkedFramework("AudioToolbox"),
         .linkedFramework("AVFoundation"),
+        .linkedFramework("OpenGL", .when(platforms: [.macOS])),
+        .linkedFramework("AppKit", .when(platforms: [.macOS])),
         .linkedLibrary("bz2"),
         .linkedLibrary("iconv"),
         .linkedLibrary("z"),
