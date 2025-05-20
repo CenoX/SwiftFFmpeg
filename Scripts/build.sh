@@ -5,7 +5,7 @@ FFMPEG_SOURCE_DIR=FFmpeg-n$FFMPEG_VERSION
 FFMPEG_LIBS="libavcodec libavdevice libavfilter libavformat libavutil libswresample libswscale"
 PREFIX=`pwd`/output
 ARCHS=("arm64" "x86_64")
-PLATFORMS=("iphoneos" "iphonesimulator" "macosx")
+PLATFORMS=("iphoneos" "iphonesimulator" "macosx" "maccatalyst")
 
 if [ ! -d $FFMPEG_SOURCE_DIR ]; then
   echo "Start downloading FFmpeg..."
@@ -14,59 +14,69 @@ if [ ! -d $FFMPEG_SOURCE_DIR ]; then
   rm -f FFmpeg-n$FFMPEG_VERSION.tar.gz
 fi
 
-echo "Start compiling FFmpeg..."
+# echo "Start compiling FFmpeg..."
 
-rm -rf $PREFIX
-mkdir -p $PREFIX
+# rm -rf $PREFIX
+# mkdir -p $PREFIX
 
-for PLATFORM in "${PLATFORMS[@]}"; do
-  for ARCH in "${ARCHS[@]}"; do
+# for PLATFORM in "${PLATFORMS[@]}"; do
+#   for ARCH in "${ARCHS[@]}"; do
 
-    # no need to build x86_64 for iPhoneOS
-    if [[ "$PLATFORM" == "iphoneos" && "$ARCH" == "x86_64" ]]; then continue; fi
+#     # no need to build x86_64 for iPhoneOS
+#     if [[ "$PLATFORM" == "iphoneos" && "$ARCH" == "x86_64" ]]; then continue; fi
 
-    echo "Building for $PLATFORM - $ARCH"
+#     echo "Building for $PLATFORM - $ARCH"
 
-    if [ "$PLATFORM" == "macosx" ]; then
-      SYSROOT=$(xcrun --sdk macosx --show-sdk-path)
-      OS_FLAGS="-mmacosx-version-min=11.0"
-    elif [ "$PLATFORM" == "iphonesimulator" ]; then
-      SYSROOT=$(xcrun --sdk iphonesimulator --show-sdk-path)
-      OS_FLAGS="-mios-simulator-version-min=18.0"
-    else
-      SYSROOT=$(xcrun --sdk iphoneos --show-sdk-path)
-      OS_FLAGS="-mios-version-min=18.0"
-    fi
+#     if [ "$PLATFORM" == "macosx" ]; then
+#       SYSROOT=$(xcrun --sdk macosx --show-sdk-path)
+#       OS_FLAGS="-mmacosx-version-min=11.0 -isysroot $SYSROOT"
+#       CC=$(xcrun -sdk $PLATFORM -f clang)
+#     elif [ "$PLATFORM" == "iphonesimulator" ]; then
+#       SYSROOT=$(xcrun --sdk iphonesimulator --show-sdk-path)
+#       OS_FLAGS="-mios-simulator-version-min=18.0 -isysroot $SYSROOT"
+#       CC=$(xcrun -sdk $PLATFORM -f clang)
+#     elif [ "$PLATFORM" == "maccatalyst" ]; then
+#       SYSROOT=$(xcrun --sdk macosx --show-sdk-path)
+#       OS_FLAGS="-target $ARCH-apple-ios18.0-macabi -isysroot $SYSROOT"
+#       CC=$(xcrun -sdk macosx -f clang)
+#       CONFIGURE_TLS_OPTIONS="--disable-securetransport"
+#     else
+#       SYSROOT=$(xcrun --sdk iphoneos --show-sdk-path)
+#       OS_FLAGS="-mios-version-min=18.0 -isysroot $SYSROOT"
+#       CC=$(xcrun -sdk $PLATFORM -f clang)
+#       CONFIGURE_TLS_OPTIONS="--enable-securetransport"
+#     fi
 
-    TARGET_PREFIX="$PREFIX/$PLATFORM-$ARCH"
-    CC=$(xcrun -sdk $PLATFORM -f clang)
+#     TARGET_PREFIX="$PREFIX/$PLATFORM-$ARCH"
 
-    cd $FFMPEG_SOURCE_DIR
-    make clean
+#     cd $FFMPEG_SOURCE_DIR
+#     make clean
 
-    ./configure \
-      --prefix=$TARGET_PREFIX \
-      --enable-cross-compile \
-      --target-os=darwin \
-      --arch=$ARCH \
-      --cc="$CC" \
-      --sysroot=$SYSROOT \
-      --extra-cflags="-arch $ARCH $OS_FLAGS" \
-      --extra-ldflags="-arch $ARCH $OS_FLAGS" \
-      --disable-programs \
-      --disable-doc \
-      --disable-debug \
-      --enable-version3 \
-      --disable-outdev=audiotoolbox \
-      --disable-videotoolbox || exit 1
+#     ./configure \
+#       --prefix=$TARGET_PREFIX \
+#       --enable-cross-compile \
+#       --target-os=darwin \
+#       --arch=$ARCH \
+#       --cc="$CC" \
+#       --sysroot=$SYSROOT \
+#       --extra-cflags="-arch $ARCH $OS_FLAGS" \
+#       --extra-ldflags="-arch $ARCH $OS_FLAGS" \
+#       --disable-programs \
+#       --disable-doc \
+#       --disable-debug \
+#       --enable-version3 \
+#       --disable-coreimage \
+#       --disable-outdev=audiotoolbox \
+#       $CONFIGURE_TLS_OPTIONS \
+#       --disable-videotoolbox || exit 1
 
-    make -j$(sysctl -n hw.logicalcpu) install || exit 1
-    cd ..
-  done
-done
+#     make -j$(sysctl -n hw.logicalcpu) install || exit 1
+#     cd ..
+#   done
+# done
 
 for LIB in $FFMPEG_LIBS; do
-  for PLATFORM in "iphonesimulator" "macosx"; do
+  for PLATFORM in "iphonesimulator" "macosx" "maccatalyst"; do
     echo "Creating fat binary for $LIB ($PLATFORM)"
     mkdir -p "$PREFIX/$PLATFORM-universal/lib"
     lipo -create \

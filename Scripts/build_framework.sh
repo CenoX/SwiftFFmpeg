@@ -3,23 +3,28 @@
 PREFIX=$1
 LIB_NAME=$2
 LIB_VERSION=$3
-PLATFORMS=("ios" "iphonesimulator" "macosx")
+PLATFORMS=("ios" "iphonesimulator" "macosx" "maccatalyst")
 LIB_XCFRAMEWORK=$PREFIX/xcframework/$LIB_NAME.xcframework
 
 for PLATFORM in "${PLATFORMS[@]}"; do
 	FRAMEWORK_PARENT_DIR=$PREFIX/framework/$PLATFORM
 
 	if [[ "$PLATFORM" == "ios" ]]; then
-    HEADER_PATH="iphoneos-arm64"
+    	HEADER_PATH="iphoneos-arm64"
 		LIB_PATH="iphoneos-arm64"
+		LIB_UNIV_PATH="iphoneos-universal"
 		TARGET="iPhoneOS"
 	elif [[ "$PLATFORM" == "iphonesimulator" ]]; then
-    HEADER_PATH="iphonesimulator-arm64"
+    	HEADER_PATH="iphonesimulator-arm64"
 		LIB_PATH="iphonesimulator-universal"
 		TARGET="iPhoneSimulator"
 	elif [[ "$PLATFORM" == "macosx" ]]; then
-    HEADER_PATH="macosx-arm64"
+    	HEADER_PATH="macosx-arm64"
 		LIB_PATH="macosx-universal"
+		TARGET="MacOSX"
+	elif [[ "$PLATFORM" == "maccatalyst" ]]; then
+		HEADER_PATH="maccatalyst-arm64"
+		LIB_PATH="maccatalyst-universal"
 		TARGET="MacOSX"
 	else
 		echo "❌ Unknown platform: $PLATFORM"
@@ -33,6 +38,8 @@ for PLATFORM in "${PLATFORMS[@]}"; do
 		LIB_DEVICE=$LIB_FRAMEWORK
 	elif [[ "$PLATFORM" == "iphonesimulator" ]]; then
 		LIB_SIM=$LIB_FRAMEWORK
+	elif [[ "$PLATFORM" == "maccatalyst" ]]; then
+		LIB_CATALYST=$LIB_FRAMEWORK
 	else
 		LIB_MACOS=$LIB_FRAMEWORK
 	fi
@@ -86,6 +93,7 @@ xcodebuild \
 	-framework $LIB_DEVICE \
 	-framework $LIB_SIM \
 	-framework $LIB_MACOS \
+	-framework $LIB_CATALYST \
 	-output $LIB_XCFRAMEWORK
 
 # error: unable to find any specific architecture information in the binary at xxx
@@ -93,10 +101,12 @@ xcodebuild \
 mkdir -p $LIB_XCFRAMEWORK/ios-arm64
 mkdir -p $LIB_XCFRAMEWORK/ios-arm64_x86_64-simulator
 mkdir -p $LIB_XCFRAMEWORK/macos-arm64_x86_64
+mkdir -p $LIB_XCFRAMEWORK/maccatalyst-arm64_x86_64
 
 cp -R $LIB_DEVICE $LIB_XCFRAMEWORK/ios-arm64
 cp -R $LIB_SIM $LIB_XCFRAMEWORK/ios-arm64_x86_64-simulator
 cp -R $LIB_MACOS $LIB_XCFRAMEWORK/macos-arm64_x86_64
+cp -R $LIB_CATALYST $LIB_XCFRAMEWORK/maccatalyst-arm64_x86_64
 
 cat > $LIB_XCFRAMEWORK/Info.plist << EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -112,10 +122,25 @@ cat > $LIB_XCFRAMEWORK/Info.plist << EOF
 			<string>$LIB_NAME.framework</string>
 			<key>SupportedArchitectures</key>
 			<array>
-				<string>arm64</string>
+			<string>arm64</string>
 			</array>
 			<key>SupportedPlatform</key>
 			<string>ios</string>
+		</dict>
+		<dict>
+			<key>LibraryIdentifier</key>
+			<string>maccatalyst-arm64_x86_64</string>
+			<key>LibraryPath</key>
+			<string>$LIB_NAME.framework</string>
+			<key>SupportedArchitectures</key>
+			<array>
+			<string>arm64</string>
+			<string>x86_64</string>
+			</array>
+			<key>SupportedPlatform</key>
+			<string>ios</string>
+			<key>SupportedPlatformVariant</key>
+			<string>maccatalyst</string>
 		</dict>
 		<dict>
 			<key>LibraryIdentifier</key>
@@ -124,12 +149,12 @@ cat > $LIB_XCFRAMEWORK/Info.plist << EOF
 			<string>$LIB_NAME.framework</string>
 			<key>SupportedArchitectures</key>
 			<array>
-        <string>x86_64</string>
-				<string>arm64</string>
+			<string>x86_64</string>
+			<string>arm64</string>
 			</array>
-      <key>SupportedPlatform</key>
+			<key>SupportedPlatform</key>
 			<string>ios</string>
-      <key>SupportedPlatformVariant</key>
+			<key>SupportedPlatformVariant</key>
 			<string>simulator</string>
 		</dict>
 		<dict>
@@ -139,8 +164,8 @@ cat > $LIB_XCFRAMEWORK/Info.plist << EOF
 			<string>$LIB_NAME.framework</string>
 			<key>SupportedArchitectures</key>
 			<array>
-        <string>x86_64</string>
-				<string>arm64</string>
+			<string>x86_64</string>
+			<string>arm64</string>
 			</array>
 			<key>SupportedPlatform</key>
 			<string>macos</string>
