@@ -46,8 +46,55 @@ for PLATFORM in "${PLATFORMS[@]}"; do
 
 	# build framework
 	rm -rf $LIB_FRAMEWORK
-	mkdir -p $LIB_FRAMEWORK/Headers
 
+	if [[ "$PLATFORM" == "macosx" || "$PLATFORM" == "maccatalyst" ]]; then
+	# macOS & Catalyst: Versions/A 구조 사용
+	mkdir -p $LIB_FRAMEWORK/Versions/A/Headers
+	mkdir -p $LIB_FRAMEWORK/Versions/A/Resources
+
+	cp -R $PREFIX/$HEADER_PATH/include/$LIB_NAME/* $LIB_FRAMEWORK/Versions/A/Headers/
+	libtool -static -o $LIB_FRAMEWORK/Versions/A/$LIB_NAME $PREFIX/$LIB_PATH/lib/$LIB_NAME.a
+
+	# Info.plist는 Resources 안으로
+	cat > $LIB_FRAMEWORK/Versions/A/Resources/Info.plist << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>$LIB_NAME</string>
+	<key>CFBundleIdentifier</key>
+	<string>org.ffmpeg.$LIB_NAME</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$LIB_NAME</string>
+	<key>CFBundlePackageType</key>
+	<string>FMWK</string>
+	<key>MinimumOSVersion</key>
+	<string>18.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$LIB_VERSION</string>
+	<key>CFBundleVersion</key>
+	<string>$LIB_VERSION</string>
+	<key>CFBundleSupportedPlatforms</key>
+	<array>
+		<string>$TARGET</string>
+	</array>
+</dict>
+</plist>
+EOF
+
+	# 심볼릭 링크 구성
+	ln -s Versions/A/Headers $LIB_FRAMEWORK/Headers
+	ln -s Versions/A/Resources $LIB_FRAMEWORK/Resources
+	ln -s Versions/A/$LIB_NAME $LIB_FRAMEWORK/$LIB_NAME
+	ln -s A $LIB_FRAMEWORK/Versions/Current
+	else
+	# iOS 등은 기존 방식 유지
+	mkdir -p $LIB_FRAMEWORK/Headers
 	cp -R $PREFIX/$HEADER_PATH/include/$LIB_NAME/* $LIB_FRAMEWORK/Headers/
 	libtool -static -o $LIB_FRAMEWORK/$LIB_NAME $PREFIX/$LIB_PATH/lib/$LIB_NAME.a
 
@@ -81,7 +128,7 @@ for PLATFORM in "${PLATFORMS[@]}"; do
 </dict>
 </plist>
 EOF
-
+	fi
 done
 
 # build xcframework
