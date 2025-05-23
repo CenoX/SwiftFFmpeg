@@ -88,10 +88,10 @@ for PLATFORM in "${PLATFORMS[@]}"; do
 EOF
 
 	# 심볼릭 링크 구성
-	ln -s Versions/A/Headers $LIB_FRAMEWORK/Headers
-	ln -s Versions/A/Resources $LIB_FRAMEWORK/Resources
-	ln -s Versions/A/$LIB_NAME $LIB_FRAMEWORK/$LIB_NAME
 	ln -s A $LIB_FRAMEWORK/Versions/Current
+	ln -s Versions/Current/Headers $LIB_FRAMEWORK/Headers
+	ln -s Versions/Current/Resources $LIB_FRAMEWORK/Resources
+	ln -s Versions/Current/$LIB_NAME $LIB_FRAMEWORK/$LIB_NAME
 	else
 	# iOS 등은 기존 방식 유지
 	mkdir -p $LIB_FRAMEWORK/Headers
