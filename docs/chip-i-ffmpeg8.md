@@ -279,10 +279,13 @@ SwiftPM product(`productRef`)로 참조하므로 이 `linkerSettings` 가 그대
 | `maccatalyst-arm64` | **❌ 없음** | ❌ 끔 | 컴파일 불가 — §4.5 |
 | `maccatalyst-x86_64` | **❌ 없음** | ❌ 끔 | 컴파일 불가 — §4.5 |
 
-**즉 시뮬레이터도 macOS 도 하드웨어 디코드가 된다. 빠지는 건 Mac Catalyst 뿐이고,
-FX Viewer 는 Catalyst 를 빌드하지 않는다**(`SUPPORTS_MACCATALYST = NO`,
-`SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"`). FX Viewer 가 쓰는 범위에서는
-**손실이 없다.**
+**즉 시뮬레이터도 macOS 도 하드웨어 디코드가 된다. 빠지는 건 Mac Catalyst 뿐이다** — 이유는
+§4.5 의 업스트림 FFmpeg 버그이고, **Catalyst 슬라이스 자체는 그대로 출하된다.**
+
+FX Viewer 에 한정하면 손실이 없다(`SUPPORTS_MACCATALYST = NO`,
+`SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"`). 다만 그건 **그 앱 하나의 사정**이지
+이 라이브러리의 지원 범위가 아니다 — 다른 소비자가 Catalyst 로 쓸 수 있고, 그쪽에서는
+하드웨어 디코드만 빠진 상태가 된다.
 
 > 혼동 주의: `TARGET_OS_IPHONE` 은 `build.sh` 의 분기 조건이 **아니다**. 그건 FFmpeg
 > C 소스(`libavcodec/videotoolbox.c`) 안의 매크로이고, `build.sh` 에는 Catalyst 를
@@ -380,21 +383,44 @@ Mac Catalyst 는 `TARGET_OS_IPHONE == 1` 이라 **iOS 분기를 탄다**. 그런
 CONFIGURE_HWACCEL_OPTIONS="--disable-videotoolbox"
 ```
 
-**왜 벤더 소스를 패치하지 않았나:** `#else` 분기가 쓰는
-`kCVPixelBufferIOSurfaceOpenGLTextureCompatibilityKey` 는 SDK 에서
-`API_AVAILABLE(macosx(10.6)) __IOS_PROHIBITED` 라서 Catalyst 에서 쓸 수 있는지가
-불확실하다. 추측으로 벤더 트리를 고치느니, 안 쓰는 슬라이스에서 끄는 쪽이 확실하다.
+### 올바른 수정은 업스트림 한 줄이다
 
-**비용은 0 이다 — FX Viewer 는 Catalyst 를 빌드하지 않는다:**
-
-```
-SUPPORTS_MACCATALYST = NO        (×2, FX Viewer.xcodeproj)
-SUPPORTED_PLATFORMS  = "iphoneos iphonesimulator"
+```c
+#if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
 ```
 
-> ⚠️ **다만 이건 슬라이스 간 비대칭이다.** iphoneos / iphonesimulator / macosx 는 HW 디코드가
-> 되고 **maccatalyst 만 안 된다**. 나중에 Catalyst 타깃을 켜는 사람은 거기서만 `ctx_create` 가
-> `ENOMEM` 을 돌려받고 영문을 모를 수 있다. 그때는 위 `#if` 가드를 패치하는 쪽으로 가야 한다.
+그 키는 Catalyst 에 **정말로 존재하지 않는다**. 따라서 Catalyst 에서 설정하지 않는 것이
+**올바른 동작**이지 땜질이 아니다. 업스트림이 이렇게 고쳐야 할 사안이다.
+
+**이걸 적용하면 Catalyst 도 videotoolbox 를 가질 수 있다. 비용은 vendored 소스 패치를
+버전 올릴 때마다 유지하는 것.** 지금은 적용하지 않았다 — vendored 패치는 별도 결정이고,
+하드웨어 디코딩을 실제로 쓰는 것 자체가 나중 과제이기 때문이다.
+
+(이전에 이 자리에 "`#else` 분기의 `kCVPixelBufferIOSurfaceOpenGLTextureCompatibilityKey`
+가 Catalyst 에서 되는지 불확실하다" 고 적었는데, 그 키를 쓸 필요가 없다. Catalyst 에서는
+**둘 다 설정하지 않는 것**이 맞다.)
+
+### 업스트림 보고 여부 — 찾지 못했다
+
+- **FFmpeg master 에 아직 그대로 있다**(2026-10-21 확인): 동일한 `#if TARGET_OS_IPHONE`
+  가드이고, `TARGET_OS_MACCATALYST` 는 `videotoolbox.c` 에도 `configure` 에도 **0건**이다.
+- FFmpeg Trac 티켓 검색(`maccatalyst videotoolbox`, `OpenGLESCompatibilityKey`) → 매치 없음.
+- FFmpeg Patchwork API 검색(`maccatalyst`, `TARGET_OS_MACCATALYST`) → 빈 결과.
+
+**기존 보고를 찾지 못했다**고만 적는다. 보고가 없다고 단정하지는 않는다 — 메일링리스트
+전문 검색까지는 하지 않았다.
+
+### ⚠️ Catalyst 를 버린 것이 아니다
+
+**Catalyst 는 출하 대상 슬라이스다.** videotoolbox 를 끈 것은 위 업스트림 충돌 때문이며,
+**의도된 절충이지 Catalyst 지원 포기가 아니다.** 이 라이브러리는 FX Viewer 한 소비자만
+쓰는 것이 아니다. (FX Viewer 가 `SUPPORTS_MACCATALYST = NO` 인 것은 그 앱의 사정일 뿐,
+이 라이브러리의 지원 범위를 정하지 않는다.)
+
+결과적으로 **슬라이스 간 비대칭**이 생긴다: iphoneos / iphonesimulator / macosx 는 하드웨어
+디코드가 되고 **maccatalyst 만 안 된다**. Catalyst 에서 하드웨어 디코드를 시도하는 코드는
+거기서만 `av_hwdevice_ctx_create` → `ENOMEM` 을 받는다. §4.0 의 표를 참고하고,
+필요해지면 위 한 줄 패치를 도입하는 쪽으로 가야 한다.
 
 곁가지로 `CONFIGURE_TLS_OPTIONS` 가 루프 반복 간에 **값이 새는** 선존 버그를 발견했다
 (`iphoneos` 에서 `--enable-securetransport` 로 설정된 뒤 `iphonesimulator`·`macosx`

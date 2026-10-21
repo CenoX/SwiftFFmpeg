@@ -58,14 +58,26 @@ for PLATFORM in "${PLATFORMS[@]}"; do
       OS_FLAGS="-target $ARCH-apple-ios18.0-macabi -isysroot $SYSROOT"
       CC=$(xcrun -sdk macosx -f clang)
       CONFIGURE_TLS_OPTIONS="--disable-securetransport"
+      # Mac Catalyst is a shipping slice, but it cannot compile VideoToolbox.
+      #
       # FFmpeg's libavcodec/videotoolbox.c guards on `#if TARGET_OS_IPHONE`,
       # which is 1 for Mac Catalyst, so it reaches for
       # kCVPixelBufferOpenGLESCompatibilityKey -- a symbol the SDK marks
-      # API_UNAVAILABLE(macCatalyst). The build fails to compile as a result
-      # (FFmpeg 8.1.3, libavcodec/videotoolbox.c:821).
-      # Catalyst is the one slice no consumer here ships, so disable the
-      # backend for it rather than patching vendored FFmpeg sources.
-      # NOTE: the maccatalyst slice therefore has NO hardware decode.
+      # API_UNAVAILABLE(macCatalyst) (CVPixelBuffer.h:246). The build fails to
+      # compile as a result (FFmpeg 8.1.3, libavcodec/videotoolbox.c:821).
+      #
+      # The real fix belongs upstream and is one line:
+      #     #if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
+      # The key genuinely does not exist on Catalyst, so not setting it is the
+      # correct behaviour, not a workaround. Applying it here would mean
+      # patching vendored FFmpeg sources on every version bump, which is a
+      # separate decision -- and hardware decoding is not consumed yet anyway.
+      # Still unfixed on FFmpeg master as of 2026-10-21 (same guard, and
+      # TARGET_OS_MACCATALYST appears nowhere in the tree).
+      #
+      # So VideoToolbox is disabled for this slice only. The maccatalyst slice
+      # therefore has NO hardware decode: a deliberate trade-off forced by the
+      # upstream conflict, NOT a decision to drop Catalyst support.
       CONFIGURE_HWACCEL_OPTIONS="--disable-videotoolbox"
     else
       SYSROOT=$(xcrun --sdk iphoneos --show-sdk-path)
