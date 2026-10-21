@@ -37,6 +37,11 @@ let package = Package(
         .linkedFramework("CoreAudio"),
         .linkedFramework("CoreImage"),
         .linkedFramework("VideoToolbox"),
+        // Required once FFmpeg is built with VideoToolbox: libavcodec's
+        // videotoolbox.o and libavutil's hwcontext_videotoolbox.o reference
+        // kCVPixelBuffer*/kCVImageBufferYCbCrMatrix_* from CoreVideo. Without
+        // this the link fails with "symbol(s) not found".
+        .linkedFramework("CoreVideo"),
         .linkedFramework("Foundation"),
         .linkedFramework("CoreMedia"),
         .linkedFramework("AudioToolbox"),

@@ -27,6 +27,24 @@ for PLATFORM in "${PLATFORMS[@]}"; do
 
     echo "Building for $PLATFORM - $ARCH"
 
+    # Set per iteration so a stale value from the previous platform cannot leak in.
+    #
+    # VideoToolbox DECODE only. Dropping --disable-videotoolbox also enables the
+    # h264/hevc/prores VideoToolbox *encoders*, which silently changes encoder
+    # discovery: this configuration has no software H.264/HEVC encoder, so
+    # avcodec_find_encoder(AV_CODEC_ID_H264) flips from NULL to
+    # h264_videotoolbox. A caller that only asks by codec id would start
+    # hardware-encoding without ever requesting it. Keep the scope to decoding;
+    # delete that line to enable hardware encoding deliberately.
+    #
+    # The VideoToolbox *filters* (yadif_videotoolbox, transpose_vt, scale_vt) come
+    # along too. They only operate on VideoToolbox frames, they change what
+    # avfilter enumerates, and yadif_videotoolbox drags in a Metal link
+    # dependency (MTLCreateSystemDefaultDevice) that consumers would have to
+    # satisfy. Not needed for decoding, so leave them out.
+    CONFIGURE_HWACCEL_OPTIONS="--disable-encoder=h264_videotoolbox,hevc_videotoolbox,prores_videotoolbox"
+    CONFIGURE_HWACCEL_OPTIONS="$CONFIGURE_HWACCEL_OPTIONS --disable-filter=yadif_videotoolbox,transpose_vt,scale_vt"
+
     if [ "$PLATFORM" == "macosx" ]; then
       SYSROOT=$(xcrun --sdk macosx --show-sdk-path)
       OS_FLAGS="-mmacosx-version-min=11.0 -isysroot $SYSROOT"
@@ -40,6 +58,15 @@ for PLATFORM in "${PLATFORMS[@]}"; do
       OS_FLAGS="-target $ARCH-apple-ios18.0-macabi -isysroot $SYSROOT"
       CC=$(xcrun -sdk macosx -f clang)
       CONFIGURE_TLS_OPTIONS="--disable-securetransport"
+      # FFmpeg's libavcodec/videotoolbox.c guards on `#if TARGET_OS_IPHONE`,
+      # which is 1 for Mac Catalyst, so it reaches for
+      # kCVPixelBufferOpenGLESCompatibilityKey -- a symbol the SDK marks
+      # API_UNAVAILABLE(macCatalyst). The build fails to compile as a result
+      # (FFmpeg 8.1.3, libavcodec/videotoolbox.c:821).
+      # Catalyst is the one slice no consumer here ships, so disable the
+      # backend for it rather than patching vendored FFmpeg sources.
+      # NOTE: the maccatalyst slice therefore has NO hardware decode.
+      CONFIGURE_HWACCEL_OPTIONS="--disable-videotoolbox"
     else
       SYSROOT=$(xcrun --sdk iphoneos --show-sdk-path)
       OS_FLAGS="-mios-version-min=18.0 -isysroot $SYSROOT"
@@ -68,7 +95,7 @@ for PLATFORM in "${PLATFORMS[@]}"; do
       --disable-coreimage \
       --disable-outdev=audiotoolbox \
       $CONFIGURE_TLS_OPTIONS \
-      --disable-videotoolbox || exit 1
+      $CONFIGURE_HWACCEL_OPTIONS || exit 1
 
     make -j$(sysctl -n hw.logicalcpu) install || exit 1
     cd ..
