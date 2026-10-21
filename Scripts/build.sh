@@ -66,12 +66,26 @@ for PLATFORM in "${PLATFORMS[@]}"; do
       # API_UNAVAILABLE(macCatalyst) (CVPixelBuffer.h:246). The build fails to
       # compile as a result (FFmpeg 8.1.3, libavcodec/videotoolbox.c:821).
       #
-      # The real fix belongs upstream and is one line:
+      # The fix belongs upstream, and it is NOT a one-line condition change.
+      # Catalyst can use NEITHER key: the #else branch's
+      # kCVPixelBufferIOSurfaceOpenGLTextureCompatibilityKey is __IOS_PROHIBITED
+      # (CVPixelBufferIOSurface.h:33) and is equally unavailable there, so
+      # merely writing `#if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST` just
+      # routes Catalyst into the #else and still fails to compile (verified).
+      # Both assignments have to be skipped:
+      #
       #     #if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
-      # The key genuinely does not exist on Catalyst, so not setting it is the
-      # correct behaviour, not a workaround. Applying it here would mean
-      # patching vendored FFmpeg sources on every version bump, which is a
-      # separate decision -- and hardware decoding is not consumed yet anyway.
+      #         ... kCVPixelBufferOpenGLESCompatibilityKey ...
+      #     #elif !TARGET_OS_MACCATALYST
+      #         ... kCVPixelBufferIOSurfaceOpenGLTextureCompatibilityKey ...
+      #     #endif
+      #
+      # That form was checked to compile for Catalyst, iOS device and macOS.
+      # These are OpenGL interop hints and nothing here uses OpenGL, so omitting
+      # them on Catalyst is the correct behaviour rather than a workaround.
+      # Applying it means carrying a vendored FFmpeg patch across every version
+      # bump, which is a separate decision -- and hardware decoding is not
+      # consumed yet anyway.
       # Still unfixed on FFmpeg master as of 2026-10-21 (same guard, and
       # TARGET_OS_MACCATALYST appears nowhere in the tree).
       #

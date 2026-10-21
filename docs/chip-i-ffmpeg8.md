@@ -312,6 +312,17 @@ FX Viewer 에 한정하면 손실이 없다(`SUPPORTS_MACCATALYST = NO`,
 **그대로 YES**이고, `avcodec_find_encoder(H264/HEVC)` 는 **NULL 로 복귀**했으며,
 소프트웨어 디코드 해시는 여전히 `940198ebf9b29935` 로 동일하다.
 
+> ⚠️ **이 표가 증명하는 것은 "백엔드가 바이너리에 컴파일돼 들어왔다" 까지다.**
+> (적대적 리뷰 지적 반영) `av_hwdevice_ctx_create` 는 디바이스 핸들만 만들 뿐
+> 디코더 세션을 열지 않는다 — `vt_device_create` 는 빈 디바이스 이름에 대해 사실상
+> 무조건 성공한다. 실제 세션 생성은 `videotoolbox.c:999` 에서 일어나고 거기서
+> 포맷 미지원·디코더 없음·일시적 사용 불가로 실패할 수 있다.
+> 즉 **특정 스트림이 실제로 하드웨어로 디코드되는지는 이 검증이 보장하지 않는다.**
+> 그건 앱이 hwaccel 을 실제로 붙일 때(칩 G 의 W6-A) 대표 스트림으로 따로 확인해야 한다.
+> 또한 이 런타임 프로브는 **macOS arm64 에서만** 실행했다(iOS 바이너리는 여기서 실행
+> 불가). iOS·시뮬레이터 슬라이스는 **심볼 수준(80개)** 으로만 확인했고, 그 슬라이스의
+> 런타임 가용성을 macOS 결과로 추론하지 않는다.
+
 `-12 ENOMEM` 은 칩 G 가 출하 바이너리에서 관측한 값과 **정확히 일치**한다 — 독립 재현됐다.
 
 ### 4.3 ⚠️ 함정 실증
@@ -383,22 +394,42 @@ Mac Catalyst 는 `TARGET_OS_IPHONE == 1` 이라 **iOS 분기를 탄다**. 그런
 CONFIGURE_HWACCEL_OPTIONS="--disable-videotoolbox"
 ```
 
-### 올바른 수정은 업스트림 한 줄이다
+### 올바른 수정 — **한 줄이 아니다** (적대적 리뷰 지적, 내가 틀렸었다)
+
+앞선 판에 "`#if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST` 한 줄이면 되고, Catalyst 에서는
+둘 다 설정하지 않게 된다" 고 적었다. **둘 다 틀렸다.**
+
+그 한 줄만 바꾸면 Catalyst 는 조건이 거짓이 되어 **`#else` 로 들어가** 다른 키
+(`kCVPixelBufferIOSurfaceOpenGLTextureCompatibilityKey`)를 설정한다. "둘 다 설정 안 함" 이
+아니다. 그리고 **그 키도 Catalyst 에서 못 쓴다** — 직접 컴파일해 확인했다:
+
+```
+error: 'kCVPixelBufferIOSurfaceOpenGLTextureCompatibilityKey' is unavailable:
+       not available on macCatalyst
+   CVPixelBufferIOSurface.h:33  API_AVAILABLE(macosx(10.6)) __IOS_PROHIBITED
+```
+
+즉 **그 한 줄 패치는 빌드를 고치지도 못한다.** Catalyst 는 `TARGET_OS_IPHONE == 1`
+**이면서** `TARGET_OS_MACCATALYST == 1` 이고(이것도 확인), 두 키 모두 금지다.
+
+**실제로 필요한 패치는 두 분기를 모두 건너뛰는 형태다:**
 
 ```c
 #if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
+    CFDictionarySetValue(buffer_attributes, kCVPixelBufferOpenGLESCompatibilityKey, kCFBooleanTrue);
+#elif !TARGET_OS_MACCATALYST
+    CFDictionarySetValue(buffer_attributes, kCVPixelBufferIOSurfaceOpenGLTextureCompatibilityKey, kCFBooleanTrue);
+#endif
 ```
 
-그 키는 Catalyst 에 **정말로 존재하지 않는다**. 따라서 Catalyst 에서 설정하지 않는 것이
-**올바른 동작**이지 땜질이 아니다. 업스트림이 이렇게 고쳐야 할 사안이다.
+이 형태가 **Catalyst · iOS 기기 · macOS 세 타깃 모두에서 컴파일되는 것을 확인했다.**
+둘 다 OpenGL 상호운용 힌트이고 여기서 OpenGL 을 쓰는 것이 없으므로, Catalyst 에서
+생략하는 것이 올바른 동작이다.
 
-**이걸 적용하면 Catalyst 도 videotoolbox 를 가질 수 있다. 비용은 vendored 소스 패치를
-버전 올릴 때마다 유지하는 것.** 지금은 적용하지 않았다 — vendored 패치는 별도 결정이고,
-하드웨어 디코딩을 실제로 쓰는 것 자체가 나중 과제이기 때문이다.
-
-(이전에 이 자리에 "`#else` 분기의 `kCVPixelBufferIOSurfaceOpenGLTextureCompatibilityKey`
-가 Catalyst 에서 되는지 불확실하다" 고 적었는데, 그 키를 쓸 필요가 없다. Catalyst 에서는
-**둘 다 설정하지 않는 것**이 맞다.)
+**적용하면 Catalyst 도 videotoolbox 를 가질 수 있다. 비용은 vendored FFmpeg 패치를
+버전 올릴 때마다 유지하는 것.** 지금은 적용하지 않았다 — 별도 결정이고 하드웨어
+디코딩 자체가 나중 과제다. 다만 **이건 "임시로 빌드를 살려둔 예외" 이지
+"4플랫폼 하드웨어 지원 완료" 가 아니다.**
 
 ### 업스트림 보고 여부 — 찾지 못했다
 
@@ -473,15 +504,62 @@ CONFIGURE_HWACCEL_OPTIONS="--disable-videotoolbox"
 
 - **커스텀 `get_format` 콜백을 단 호출자**가 "후보 배열의 첫 항목을 고른다" 식이면,
   하드웨어 디바이스를 설정한 적이 없는데도 **하드웨어 포맷을 고를 수 있다.**
+  `h264_slice.c:877` 이 `AV_PIX_FMT_VIDEOTOOLBOX` 를 **소프트웨어 포맷보다 앞에** 넣는다.
 - ProRes 를 소프트웨어로 디코드하던 호출자는 전에 **불리지 않던 콜백이 불리기 시작**한다.
+- ⚠️ **"hw 디바이스를 안 붙였으니 안전하다" 는 보장이 아니다**(적대적 리뷰 지적).
+  `hwconfig.h:75` 의 `AV_CODEC_HW_CONFIG_METHOD_INTERNAL` 때문에 VideoToolbox h264 는
+  디바이스 컨텍스트 없이도 **내부 초기화로 동작할 수 있다**. 실제로 §4.2 의
+  `methods=0xb` 에 `INTERNAL` 비트가 켜져 있다. 따라서 커스텀 콜백이 `formats[0]` 를
+  고르면 **불투명 `CVPixelBuffer` 프레임이 돌아오고**, `AVFrame.data` 를 CPU 평면으로
+  읽는 렌더러는 컴파일 에러 없이 깨진다.
 
 → **FX Viewer 영향 없음**: 커스텀 `get_format`/`GetFormatHandler` 사용 **0건**,
 ProRes 디코드 **0건**. 그래서 §4.6 의 해시 동일성이 FX Viewer 에 대해서는 충분하다.
+**다만 라이브러리 소비자 일반에게는 마이그레이션 주의사항이다** — CPU 평면을 읽는
+코드는 콜백에서 **명시적으로 소프트웨어 포맷을 골라야** 한다.
 
 **정확한 주장은 이것이다:** 기본 `get_format` 구성으로 H.264 를 소프트웨어 디코드하는
 경로는 검증된 범위에서 **바이트 단위 동일**하다. 필터 열거 변화는 **껐으므로 없다**.
 남는 유일한 라이브러리 레벨 변화는 **`get_format` 후보 목록**이고, 이건 커스텀 콜백을
 단 호출자에게만 보인다 — FX Viewer 는 해당 없음.
+
+### 4.6b ✅ 7.1.1 → 8.1.3 실제 비교 — 픽셀·타이밍·리먹스 전부 동일
+
+§4.6 의 해시 비교는 **8.1.3 두 빌드 사이**(videotoolbox 플래그만 다름)라서
+**버전 상승 자체는 검증하지 않는다**. 적대적 리뷰가 이걸 짚었고 타당해서,
+**FFmpeg 7.1.1 을 실제로 빌드해 직접 비교**했다(macosx/arm64, 기존 플래그 그대로).
+
+비교 항목을 픽셀 너머로 넓혔다 — 리뷰가 "타임스탬프와 먹싱된 패킷은 해시에 안 들어간다"
+고 지적한 부분이다:
+
+| 항목 | 7.1.1 (`libavcodec 61.19`) | 8.1.3 (`libavcodec 62.28`) |
+|---|---|---|
+| 스트림 `time_base` / `avg_frame_rate` / `start_time` / `duration` / `nb_frames` | 동일 | **동일** |
+| `codecpar` (id·w·h·format·profile·level·SAR·extradata_size) | 동일 | **동일** |
+| `extradata` 해시 (SPS/PPS) | `195d3116d2608214` | **동일** |
+| 디코드 프레임 수 / 디먹스 패킷 수 | 100 / 100 | **동일** |
+| **PIXEL_HASH** (전 프레임 전 평면) | `b4864c5a7b910e65` | **동일** |
+| **TIMING_HASH** (`pts`·`best_effort_timestamp`·`duration`·`pict_type`·`key_frame`·`color_*`) | `fb0e458d20d3510e` | **동일** |
+| 리먹스 출력 `time_base` | 1/90000 | **동일** |
+
+**B-프레임 클립으로도 반복했다**(1280×720, `-bf 3 -g 50`, 실측 I 3 / P 74 / **B 73**):
+`PIXEL_HASH=83647dc675fbbe08`, `TIMING_HASH=687a7ec0c206c2e8` — **양쪽 동일**.
+
+**리먹스(스트림 카피) 출력**: 바이트가 **13개** 다르다. 원인은 머서가 써넣는 버전
+문자열 하나다 — `Lavf61.7.100` → `Lavf62.12.103`(길이가 1 늘어 mp4 박스 길이 필드도 밀린다).
+`-map_metadata -1` 로 그 태그를 떼고 다시 비교하면 **sha256 이 완전히 같다**:
+
+```
+711 normalized: b31eedf3c8a2b63389b599ae1883af6a
+813 normalized: b31eedf3c8a2b63389b599ae1883af6a   ✅ 동일
+```
+
+패킷 수준(`pts`·`dts`·`duration`·`size`·`flags`)은 애초에 `TIMING_HASH` 에 포함돼 있고
+동일하다. 즉 **녹화(remux) 산출물의 실질 내용은 바뀌지 않는다.**
+
+> 남는 한계(정직하게): 이건 **파일 기반 H.264 클립 2종**이다. 실제 RTSP 의 패킷 손실·
+> 재접속·중간 SPS 변경·멀티스레드 디코딩 지연까지 재현하지는 않았다. 그 영역은 이
+> 비교가 덮지 못한다.
 
 ### 4.7 이걸 켠다고 바로 빨라지지는 않는다
 
@@ -513,30 +591,34 @@ ProRes 디코드 **0건**. 그래서 §4.6 의 해시 동일성이 FX Viewer 에
 
 ---
 
-## 5.5 적대적 피어 리뷰 (codex-peer, reviewer) — 2라운드
+## 5.5 적대적 피어 리뷰 (codex-peer) — 3라운드
 
-**1라운드**가 지적한 4건 중 **2건이 내 실수**였고 고쳤다:
+### 3라운드 (최종, `adversarial-reviewer`) — `state: passed`, 지적 4건
 
-| # | 지적 | 내 대응 |
-|---|---|---|
-| F1 **high** | 플래그 제거가 디코더뿐 아니라 **VT 인코더 3종**도 켜서 `avcodec_find_encoder(H264)` 가 `nil`→비-`nil` 로 뒤집힌다 | **맞다. 내가 놓쳤다.** 실측 확인 후 인코더 3종을 명시적으로 비활성화 (§3.3) |
-| F2 medium | maccatalyst 수정이 커밋에 안 들어가 있다 | 커밋에 포함시킴 (`d8807f2` 로 amend) |
-| F3 medium | "VT 출력은 NV12/BGRA 뿐"은 과장 — `hwcontext_videotoolbox.c` 는 YUV420P 도 매핑한다 | **맞다.** 소스 확인 후 §4.7 정정 |
-| F4 low | "런타임에 써야 오브젝트가 링크된다"는 틀렸다 — 레지스트리 참조는 정적이다 | **맞다.** §4.4 주석 정정 |
+머지 게이트 조건으로 깨끗한 트리에서 돌렸다(앞 두 라운드는 동시 빌드/편집 때문에
+`workspace_drift` 였다). 판정 `partial` / `concerns`, 지적 4건 **전부 타당했고 전부 대응했다.**
 
-**2라운드**(최종 형상 대상)에서 확인된 것:
+| # | 심각도 | 지적 | 대응 |
+|---|---|---|---|
+| F1 | high | `av_hwdevice_ctx_create` 성공은 **스트림이 하드웨어로 디코드된다는 증명이 아니다** — `vt_device_create` 는 세션을 안 열고 사실상 무조건 성공한다. 실제 세션은 `videotoolbox.c:999` 에서 열리고 거기서 실패할 수 있다 | **인정. 주장 범위를 좁혔다** — "백엔드가 컴파일돼 들어왔다" 까지만. macOS 에서만 런타임 실행했고 iOS 슬라이스는 심볼 확인뿐이라는 점도 명시 (§4.2) |
+| F2 | high | 해시 비교가 **8.1.3 두 빌드 사이**라 버전 상승을 검증하지 않는다. 픽셀만 보고 **타임스탬프·먹싱 패킷**은 안 본다 | **인정. 7.1.1 을 실제로 빌드해 비교했다** — 픽셀·타이밍·extradata·리먹스까지. 전부 동일 (§4.6b) |
+| F3 | medium | 리포트의 **한 줄 패치가 설명대로 동작하지 않는다** — `#else` 로 넘어갈 뿐 둘 다 생략하지 않는다 | **인정. 내가 틀렸다.** 게다가 확인해보니 `#else` 키도 Catalyst 금지라 **그 패치는 빌드를 고치지도 못한다.** `#elif !TARGET_OS_MACCATALYST` 형태로 정정하고 3타깃 컴파일 확인 (§4.5) |
+| F4 | medium | 커스텀 `get_format` 이 `formats[0]` 을 고르면 하드웨어 프레임을 받을 수 있다. `hwconfig.h:75` 의 `INTERNAL` 때문에 **디바이스 미지정이 소프트웨어를 보장하지 않는다** | **인정. §4.6(b) 에 `INTERNAL` 근거를 추가**하고 "CPU 평면을 읽는 소비자는 명시적으로 소프트웨어 포맷을 고르라" 는 마이그레이션 주의로 격상 |
 
-- ✅ "FFmpeg 8.1.3 에 Swift 소스 변경 불필요" — **독립 확인됨**
-- ✅ 인코더 3종 비활성화로 **인코더 탐색 변화는 완전히 닫혔다**. 추가로 뒤집히는
-  코덱 ID **없음**
-- ✅ `AVIOContext.size()` 의 `Int32(clamping:)` 은 **진짜 음수 AVERROR 를 삼키지 않는다**
-  (모든 `AVERROR` 태그 값이 `Int32.min` 안쪽이라 클램프 대상이 아니다)
-- ⚠️ 남은 2건(필터 열거, `get_format` 후보) → §4.6 에 명시하고 FX Viewer 영향 0 확인
+**피어가 확인해준 것**: 인코더·필터 제외 목록은 **디코드 전용 범위로 충분하다**
+(추가로 딸려 오는 것 없음).
 
-> 리뷰 2회 모두 `workspace_drift` 로 끝났다 — 1회차는 동시 실행 중이던 빌드가,
-> 2회차는 내가 리뷰 도중 리포트를 편집한 탓이다. 내용은 정상 산출됐고 위에 반영했지만,
-> 하니스가 "깨끗한 트리에서 돌린 리뷰"로 서명해주지는 않았다. **피어 출력은 증거이지
-> 승인이 아니다** — 위 항목은 전부 내가 소스·실측으로 재확인한 것만 적었다.
+### 1·2라운드 (`reviewer`) — 지적 4건, 그중 2건이 내 실수였다
+
+- **VT 인코더 3종이 켜져 `avcodec_find_encoder(H264)` 가 `nil`→비-`nil`** → 인코더 비활성화 (§3.3)
+- maccatalyst 수정이 커밋 누락 → 포함
+- "VT 출력은 NV12/BGRA 뿐" 과장 → `hwcontext_videotoolbox.c` 확인 후 정정 (§4.7)
+- "런타임에 써야 링크된다" 틀림 → 정정 (§4.4)
+- `AVIOContext.size()` 의 `Int32(clamping:)` 이 **진짜 음수 AVERROR 를 삼키지 않음** 확인
+
+> **피어 출력은 증거이지 승인이 아니다.** 위 항목은 전부 내가 소스와 실측으로
+> 재확인한 것만 적었다. 3라운드 판정은 `partial`(일부 항목은 저장소 밖이라 확인 불가)
+> 이지 무조건 통과가 아니다.
 
 ---
 
