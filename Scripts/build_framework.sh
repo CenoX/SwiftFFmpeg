@@ -155,6 +155,13 @@ cp -R $LIB_SIM $LIB_XCFRAMEWORK/ios-arm64_x86_64-simulator
 cp -R $LIB_MACOS $LIB_XCFRAMEWORK/macos-arm64_x86_64
 cp -R $LIB_CATALYST $LIB_XCFRAMEWORK/maccatalyst-arm64_x86_64
 
+# xcodebuild -create-xcframework above names the Catalyst slice
+# "ios-arm64_x86_64-maccatalyst", but the Info.plist written below declares it as
+# "maccatalyst-arm64_x86_64" (which we populate ourselves, just above). The
+# xcodebuild-named directory is left behind referenced by nothing -- roughly
+# 63 MiB of dead weight across the seven xcframeworks. Drop it.
+rm -rf $LIB_XCFRAMEWORK/ios-arm64_x86_64-maccatalyst
+
 cat > $LIB_XCFRAMEWORK/Info.plist << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
