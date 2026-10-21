@@ -610,55 +610,104 @@ swift test   →  Executed 10 tests, with 0 failures
 | SW 디코드 전 프레임 해시 | `940198ebf9b29935` (기존과 동일) |
 | `yadif_videotoolbox` / `MTLCreateSystemDefaultDevice` | **0건** |
 
-## 7.5 아티팩트(zip) 갱신 — 크기 측정과 **GitHub 100 MiB 벽**
+## 7.5 ⭐ 이 레포의 바이너리 배포 경로 — 추적되는 것과 안 되는 것
 
-사용자가 "videotoolbox 켠 채로 8.1.3 바이너리까지 커밋" 으로 정해서 측정했다.
+이번 작업에서 가장 오래 사람을 헷갈리게 한 부분이고, 실제로 **다른 칩 워크트리들을
+깨뜨린 원인**이라 따로 남긴다.
 
-### 먼저 고친 것 — xcframework 안에 고아 디렉터리가 있었다 (`ea39beb`)
+### 링크 대상은 git 에 없다
 
-`build_framework.sh` 가 `xcodebuild -create-xcframework` 를 돌린 뒤 `Info.plist` 를
-손으로 덮어쓰는데, xcodebuild 가 만든 Catalyst 슬라이스 이름
-(`ios-arm64_x86_64-maccatalyst`)과 손으로 쓴 plist 의 이름
-(`maccatalyst-arm64_x86_64`)이 **달라서** 전자가 통째로 고아가 된다.
-어느 소비자도 참조할 수 없는 **63.3 MiB**(libavcodec 에서만 36.7 MiB)다.
-제거 후 `Scripts/output/xcframework` **283 MB → 220 MB**.
+```swift
+// Package.swift
+.binaryTarget(name: "libavcodec", path: "Scripts/output/xcframework/libavcodec.xcframework")
+```
 
-### 크기 전/후
+```
+// FX Viewer.xcodeproj/project.pbxproj
+$(SRCROOT)/SwiftFFmpeg/Scripts/output/xcframework/libavcodec.xcframework
+$(SRCROOT)/SwiftFFmpeg/Scripts/output/include
+```
 
-| zip | 기존 (2020, macos-x86_64 1슬라이스) | 신규 (8.1.3, 4슬라이스) | 배수 |
+둘 다 **`Scripts/output/`** 을 가리킨다. 그런데 그 디렉터리는 추적되지 않는다:
+
+```
+$ git check-ignore -v Scripts/output/x.a
+.gitignore:71:scripts/*     Scripts/output/x.a
+$ git config core.ignorecase
+true
+```
+
+`.gitignore:71` 의 **`scripts/*`** 가 macOS 의 `core.ignorecase=true` 때문에
+**대문자 `Scripts/`** 에까지 매칭된다. 바로 아래 `!scripts/*.sh` 예외와 같이 보면
+소문자 `scripts/` 디렉터리를 노린 규칙이 **오발한 것으로 보인다**
+(의도적으로 `Scripts/` 를 무시하려 했다면 `!scripts/*.sh` 예외가 필요 없다).
+
+### 🔴 그래서 새 클론·새 워크트리는 그대로는 빌드되지 않는다
+
+```
+error: binary target 'libavcodec' does not contain a binary artifact
+```
+
+체크아웃만 해서는 `Scripts/output/` 이 없으니 SwiftPM 이 binaryTarget 을 못 찾는다.
+**이번 작업 중 여러 칩 워크트리가 실제로 이 에러로 깨졌고**, 상위 세션은
+`Scripts/output` 을 심링크해서 우회했다.
+
+**새 클론/워크트리에서 반드시 먼저:**
+
+```bash
+cd SwiftFFmpeg/Scripts && ./build.sh      # 7슬라이스, 수십 분
+```
+
+서브모듈 핀을 옮길 때도 동일하다 — **핀 이동 ≠ 새 바이너리**(§6).
+
+### 커밋된 `xcframework/*.zip` 은 참조 0건의 2020년 레거시다
+
+- 커밋 **`3eea7d8` "add precompiled xcframework"** 한 번에 들어온 뒤 **갱신 이력 없음**
+- 내용물은 **`macos-x86_64` 단일 슬라이스** — 7.1.1 도 아니고 2020년 macOS 전용 빌드다
+- 레포 전체에서 **참조 0건**: `Package.swift`, FX Viewer `project.pbxproj`, 스크립트, 문서
+
+즉 "커밋된 zip 이 구버전이라 앱이 어긋난다"는 상태는 **존재하지 않는다.**
+아무도 그 파일을 읽지 않기 때문이다. 어긋남을 막는 건 zip 갱신이 아니라 위 재빌드 절차다.
+
+### 갱신하지 않기로 했다 — 측정값은 남긴다
+
+사용자 결정: **zip 을 커밋하지 않는다.** 아무것도 읽지 않는 자리에 191 MiB 를 넣어서
+얻는 게 없고, 애초에 **GitHub 파일 한도에 걸린다.**
+나중에 배포 방식(LFS / 릴리스 아티팩트 / 재빌드 유지)을 정할 때 입력이 되도록
+실측값을 남겨둔다.
+
+| zip | 기존 (2020, `macos-x86_64` 1슬라이스) | 신규 8.1.3 (4슬라이스, 7아키텍처) | 배수 |
 |---|---:|---:|---:|
-| libavcodec.zip | 7,801,575 B (7.4 MiB) | **121,441,140 B (115.8 MiB)** | ×15.6 |
+| libavcodec.zip | 7,801,575 B (7.4 MiB) | **121,441,140 B (115.8 MiB)** 🚨 | ×15.6 |
 | libavfilter.zip | 2,060,739 B (2.0 MiB) | 34,953,142 B (33.3 MiB) | ×17.0 |
 | libavformat.zip | 1,447,855 B (1.4 MiB) | 25,995,496 B (24.8 MiB) | ×18.0 |
 | libswscale.zip | 419,899 B (0.4 MiB) | 8,682,325 B (8.3 MiB) | ×20.7 |
 | libavutil.zip | 489,909 B (0.5 MiB) | 8,024,041 B (7.7 MiB) | ×16.4 |
 | libswresample.zip | 81,347 B (0.08 MiB) | 1,015,375 B (1.0 MiB) | ×12.5 |
 | libavdevice.zip | 33,487 B (0.03 MiB) | 430,337 B (0.4 MiB) | ×12.9 |
-| libpostproc.zip | 47,878 B | — (이 빌드는 안 만든다) | — |
+| libpostproc.zip | 47,878 B | — (이 빌드는 만들지 않는다) | — |
 | **합계** | **12,382,689 B (11.8 MiB)** | **200,541,856 B (191.3 MiB)** | **×16.2** |
 
-기존 zip 이 작았던 건 8.x 라서가 아니라 **슬라이스가 `macos-x86_64` 하나뿐**이었기
-때문이다(2020년 유물). 신규는 iOS 기기 + 시뮬레이터(2arch) + macOS(2arch) +
-Catalyst(2arch) = 실질 7아키텍처다.
+- **`libavcodec.zip` 115.8 MiB 는 GitHub 파일 하드 한도 100 MiB 를 넘는다** → 푸시 거부.
+- 고아 디렉터리 제거 + `zip -9` + `strip -S -x` 를 **모두 적용한 뒤**의 수치다
+  (`--disable-debug` 빌드라 strip 효과는 0).
+- 참고: Catalyst 슬라이스를 빼면 **69.3 MiB** 로 한도를 통과한다. 다만 이 라이브러리가
+  FX Viewer 전용이 아니므로 **Catalyst 는 버리지 않기로 했다.**
+- 기존 zip 이 작았던 건 버전 때문이 아니라 **슬라이스가 하나뿐**이었기 때문이다.
 
-### 🚨 `libavcodec.zip` 115.8 MiB 는 **GitHub 파일 크기 한도(100 MiB)를 넘는다**
+### 부수적으로 고친 것 — 고아 디렉터리 63.3 MiB (`ea39beb`)
 
-푸시가 **거부된다**. 고아 제거와 `zip -9`, `strip -S -x` 까지 적용한 뒤의 수치다
-(strip 은 `--disable-debug` 빌드라 효과 0).
+`build_framework.sh` 가 `xcodebuild -create-xcframework` 를 돌린 뒤 `Info.plist` 를
+손으로 덮어쓰는데, xcodebuild 의 Catalyst 슬라이스 이름
+(`ios-arm64_x86_64-maccatalyst`)과 손으로 쓴 plist 의 이름
+(`maccatalyst-arm64_x86_64`)이 달라 전자가 통째로 고아가 됐다.
+`Info.plist` 가 가리키지 않으니 **어떤 소비자도 쓸 수 없는** 순수 낭비다.
 
-**Catalyst 슬라이스를 빼면 69.3 MiB 로 한도 안에 들어온다.** Catalyst 는
-어차피 §4.5 때문에 하드웨어 디코드가 없고, FX Viewer 는 빌드하지 않는다
-(`SUPPORTS_MACCATALYST = NO`).
+제거 후 `Scripts/output/xcframework` **283 MB → 220 MB**. 소비자가 해석할 수 있는
+슬라이스 구성은 **변하지 않았다**(ios-arm64 / ios-arm64_x86_64-simulator /
+macos-arm64_x86_64 / maccatalyst-arm64_x86_64 네 개 그대로).
 
-→ **아직 커밋하지 않았다.** §8 에서 판단을 요청한다.
-
-> 참고: 애초에 "zip 이 7.1.1 이라 앱이 어긋난다"는 전제는 성립하지 않는다.
-> 앱이 링크하는 건 `Scripts/output/xcframework/`(gitignore 대상 로컬 빌드)이고
-> 커밋된 `xcframework/*.zip` 은 `Package.swift` 에서도 FX Viewer 에서도
-> **참조 0건**이다. zip 을 갱신해도 "재빌드 안 하면 옛 바이너리" 문제는 그대로다.
-> 그걸 막는 건 zip 커밋이 아니라 §6 의 재빌드 절차다.
-
----
+> **`Scripts/output` 자체를 커밋하는 것은 별도 결정이다** — 이번에 손대지 않았다.
 
 ## 7.6 ✅ FX Viewer 링크 검증 — CoreVideo 수정이 실제로 먹는다
 
@@ -695,22 +744,25 @@ videotoolbox 백엔드는 **바이너리에 들어갔지만 앱은 여전히 소
 
 ---
 
-## 8. 사용자 결정이 필요한 것
+## 8. 결정된 것 / 남은 것
 
-1. **🚨 `xcframework/*.zip` 갱신이 GitHub 한도에 걸린다 — 결정 필요.**
-   `libavcodec.zip` 이 **115.8 MiB** 로 GitHub 파일 한도 **100 MiB** 를 넘어 푸시가
-   거부된다(§7.5). 선택지:
-   - **(A) Catalyst 슬라이스를 빼고 커밋** → `libavcodec.zip` **69.3 MiB**, 한도 통과.
-     Catalyst 는 하드웨어 디코드도 없고 FX Viewer 도 안 쓴다. **권고안.**
-   - **(B) Git LFS 도입** → 모든 슬라이스 유지, 레포 운영 방식이 바뀐다.
-   - **(C) 커밋하지 않음** → 어차피 참조 0건이고, 재빌드 절차(§6)가 실제 배포 경로다.
-   아래 기존 논점도 함께:
-   §6 근거로 불필요하다고 판단했다: 2020년 유물이고, `Package.swift` 도 FX Viewer 도
-   참조하지 않으며(참조 0건), 실제 경로는 `Scripts/output/xcframework/`(gitignore 대상)다.
-   **용량도 문제다 — 이번에 생성된 xcframework 전체가 283 MB** 이고
-   그중 `libavcodec.xcframework` 하나가 163 MB 다. 압축해도 레포에 100 MB 단위를
-   얹는 셈이고 GitHub 파일 크기 제한(100 MB)에도 걸린다. 원하면 말해달라.
-2. **`.gitignore` 의 `docs/`** — 이 리포트는 `git add -f` 로 강제 추가했다.
-   `docs/` 는 jazzy 생성물용 무시 규칙인데 손으로 쓴 문서까지 삼킨다. 예외 규칙
-   (`!docs/chip-*.md`)을 넣을지는 사용자 판단.
-3. **9.x 이동** — 현재 FFmpeg 최신은 9.0.2 다. 별도 과제로 다룰지.
+### 결정됨
+
+1. **`xcframework/*.zip` 은 갱신하지 않는다.** (사용자 결정)
+   참조 0건인 자리에 191 MiB 를 넣어 얻을 게 없고, `libavcodec.zip` 115.8 MiB 가
+   GitHub 하드 한도 100 MiB 를 넘는다. 기존 2020년 zip 은 **그대로 뒀다**
+   (지우는 건 별건이고 히스토리 크기도 줄지 않는다). 측정값은 §7.5 에 남겼다.
+2. **Mac Catalyst 슬라이스는 유지한다.** 이 라이브러리는 FX Viewer 전용이 아니다.
+   (Catalyst 에 videotoolbox 가 없는 것은 §4.5 의 FFmpeg 버그 때문이고 별개다.)
+3. **videotoolbox 는 켠 채로 간다.** 지금은 "켰지만 쓰지 않는" 상태이고
+   그게 의도다 — §7.7.
+
+### 남은 판단
+
+1. **`.gitignore:71` 의 `scripts/*`** — 대소문자 오발로 `Scripts/` 를 삼키고 있다(§7.5).
+   의도한 규칙이었는지, `!docs/chip-*.md` 와 함께 정리할지는 레포 주인 판단.
+   (이 리포트도 `docs/` 가 무시돼서 `git add -f` 로 넣었다.)
+2. **`Scripts/output` 을 추적할지** — 지금은 각자 로컬 빌드다. 새 클론이 바로 안 빌드되는
+   원인이기도 하다(§7.5). LFS·릴리스 아티팩트·현행 유지 중 선택.
+3. **9.x 이동** — 현재 FFmpeg 최신은 9.0.2 다. 8.1 → 9.0 은 또 한 번의 API 제거
+   라운드를 포함하므로 별도 과제로.
