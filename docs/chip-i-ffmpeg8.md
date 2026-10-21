@@ -610,9 +610,101 @@ swift test   →  Executed 10 tests, with 0 failures
 | SW 디코드 전 프레임 해시 | `940198ebf9b29935` (기존과 동일) |
 | `yadif_videotoolbox` / `MTLCreateSystemDefaultDevice` | **0건** |
 
+## 7.5 아티팩트(zip) 갱신 — 크기 측정과 **GitHub 100 MiB 벽**
+
+사용자가 "videotoolbox 켠 채로 8.1.3 바이너리까지 커밋" 으로 정해서 측정했다.
+
+### 먼저 고친 것 — xcframework 안에 고아 디렉터리가 있었다 (`ea39beb`)
+
+`build_framework.sh` 가 `xcodebuild -create-xcframework` 를 돌린 뒤 `Info.plist` 를
+손으로 덮어쓰는데, xcodebuild 가 만든 Catalyst 슬라이스 이름
+(`ios-arm64_x86_64-maccatalyst`)과 손으로 쓴 plist 의 이름
+(`maccatalyst-arm64_x86_64`)이 **달라서** 전자가 통째로 고아가 된다.
+어느 소비자도 참조할 수 없는 **63.3 MiB**(libavcodec 에서만 36.7 MiB)다.
+제거 후 `Scripts/output/xcframework` **283 MB → 220 MB**.
+
+### 크기 전/후
+
+| zip | 기존 (2020, macos-x86_64 1슬라이스) | 신규 (8.1.3, 4슬라이스) | 배수 |
+|---|---:|---:|---:|
+| libavcodec.zip | 7,801,575 B (7.4 MiB) | **121,441,140 B (115.8 MiB)** | ×15.6 |
+| libavfilter.zip | 2,060,739 B (2.0 MiB) | 34,953,142 B (33.3 MiB) | ×17.0 |
+| libavformat.zip | 1,447,855 B (1.4 MiB) | 25,995,496 B (24.8 MiB) | ×18.0 |
+| libswscale.zip | 419,899 B (0.4 MiB) | 8,682,325 B (8.3 MiB) | ×20.7 |
+| libavutil.zip | 489,909 B (0.5 MiB) | 8,024,041 B (7.7 MiB) | ×16.4 |
+| libswresample.zip | 81,347 B (0.08 MiB) | 1,015,375 B (1.0 MiB) | ×12.5 |
+| libavdevice.zip | 33,487 B (0.03 MiB) | 430,337 B (0.4 MiB) | ×12.9 |
+| libpostproc.zip | 47,878 B | — (이 빌드는 안 만든다) | — |
+| **합계** | **12,382,689 B (11.8 MiB)** | **200,541,856 B (191.3 MiB)** | **×16.2** |
+
+기존 zip 이 작았던 건 8.x 라서가 아니라 **슬라이스가 `macos-x86_64` 하나뿐**이었기
+때문이다(2020년 유물). 신규는 iOS 기기 + 시뮬레이터(2arch) + macOS(2arch) +
+Catalyst(2arch) = 실질 7아키텍처다.
+
+### 🚨 `libavcodec.zip` 115.8 MiB 는 **GitHub 파일 크기 한도(100 MiB)를 넘는다**
+
+푸시가 **거부된다**. 고아 제거와 `zip -9`, `strip -S -x` 까지 적용한 뒤의 수치다
+(strip 은 `--disable-debug` 빌드라 효과 0).
+
+**Catalyst 슬라이스를 빼면 69.3 MiB 로 한도 안에 들어온다.** Catalyst 는
+어차피 §4.5 때문에 하드웨어 디코드가 없고, FX Viewer 는 빌드하지 않는다
+(`SUPPORTS_MACCATALYST = NO`).
+
+→ **아직 커밋하지 않았다.** §8 에서 판단을 요청한다.
+
+> 참고: 애초에 "zip 이 7.1.1 이라 앱이 어긋난다"는 전제는 성립하지 않는다.
+> 앱이 링크하는 건 `Scripts/output/xcframework/`(gitignore 대상 로컬 빌드)이고
+> 커밋된 `xcframework/*.zip` 은 `Package.swift` 에서도 FX Viewer 에서도
+> **참조 0건**이다. zip 을 갱신해도 "재빌드 안 하면 옛 바이너리" 문제는 그대로다.
+> 그걸 막는 건 zip 커밋이 아니라 §6 의 재빌드 절차다.
+
+---
+
+## 7.6 ✅ FX Viewer 링크 검증 — CoreVideo 수정이 실제로 먹는다
+
+**fx-viewer-ios 는 건드리지 않았다**(읽기만). 대신 변경의 핵심인 **iOS arm64 링크**를
+출하 슬라이스(`Scripts/output/iphoneos-arm64`)에 대해 직접 검증했다.
+`Package.swift` 가 나열한 프레임워크 집합 그대로, CoreVideo 유무만 바꿔서:
+
+| | 결과 |
+|---|---|
+| **CoreVideo 없이** (수정 전 `Package.swift`) | ❌ **링크 실패** — `Undefined symbols for architecture arm64: _kCVImageBufferCGColorSpaceKey, _kCVImageBufferChromaLocation*` … |
+| **CoreVideo 포함** (커밋 `d8807f2`) | ✅ **링크 성공** — `Mach-O 64-bit executable arm64` 생성 |
+
+즉 수정은 iOS 에서 **필요하고 충분하다**. 추가로:
+
+- `swift build` (macOS) ✅ / `swift test` **10/10** ✅
+- `xcodebuild -scheme SwiftFFmpeg -destination 'generic/platform=iOS'` → **BUILD SUCCEEDED** ✅
+
+> 앱 전체(`FX Viewer.xcodeproj`) 빌드는 **하지 않았다.** 그러려면 서브모듈을 내 커밋으로
+> 체크아웃하고 그쪽 `Scripts/output` 을 갈아끼워야 하는데, 그건 사용자 체크아웃을
+> 변경하는 일이라 범위 밖으로 뒀다. 변경된 건 라이브러리뿐이고 앱 소스는 그대로이므로,
+> 위 iOS arm64 링크 검증이 이 수정에 대한 정확한 시험이다.
+
+---
+
+## 7.7 "켰지만 쓰지 않는다" 가 의도된 상태다
+
+videotoolbox 백엔드는 **바이너리에 들어갔지만 앱은 여전히 소프트웨어로 디코드한다.**
+앱에 하드웨어 프레임을 요청하는 코드가 없기 때문이다 — `getFormat` 콜백 **0건**,
+`hwDeviceContext` 대입 **0건**, `AVFilter` **0건**. §4.6 의 디코드 해시가
+기존과 **바이트 단위로 동일**한 것이 그 증거다.
+
+지금 켜두는 이유는 **나중에 FFmpeg 을 4플랫폼 재빌드하지 않기 위해서**다.
+하드웨어 디코드를 실제로 쓰는 작업(칩 G 의 W6-A/W6-B)은 앱 쪽 별도 과제다.
+
+---
+
 ## 8. 사용자 결정이 필요한 것
 
-1. **`xcframework/*.zip` 을 갱신할까? → 안 했다. 확인 부탁한다.**
+1. **🚨 `xcframework/*.zip` 갱신이 GitHub 한도에 걸린다 — 결정 필요.**
+   `libavcodec.zip` 이 **115.8 MiB** 로 GitHub 파일 한도 **100 MiB** 를 넘어 푸시가
+   거부된다(§7.5). 선택지:
+   - **(A) Catalyst 슬라이스를 빼고 커밋** → `libavcodec.zip` **69.3 MiB**, 한도 통과.
+     Catalyst 는 하드웨어 디코드도 없고 FX Viewer 도 안 쓴다. **권고안.**
+   - **(B) Git LFS 도입** → 모든 슬라이스 유지, 레포 운영 방식이 바뀐다.
+   - **(C) 커밋하지 않음** → 어차피 참조 0건이고, 재빌드 절차(§6)가 실제 배포 경로다.
+   아래 기존 논점도 함께:
    §6 근거로 불필요하다고 판단했다: 2020년 유물이고, `Package.swift` 도 FX Viewer 도
    참조하지 않으며(참조 0건), 실제 경로는 `Scripts/output/xcframework/`(gitignore 대상)다.
    **용량도 문제다 — 이번에 생성된 xcframework 전체가 283 MB** 이고
